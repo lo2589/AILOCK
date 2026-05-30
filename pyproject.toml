@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ailock"
+version = "0.1.0"
+description = "AiLock - encrypt files in place to protect from AI modifications"
+requires-python = ">=3.11"
+dependencies = [
+    "argon2-cffi>=21.0",
+    "cryptography>=41.0",
+    "pyzipper>=0.3.6",
+]
+
+[project.scripts]
+ailock = "aloc.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["aloc*"]

@@ -1,0 +1,363 @@
+"""Memory-only execution engine for ailock.
+
+Decrypts encrypted Python files into memory and executes them without
+ever writing plaintext to disk. Uses a custom import hook so that
+multi-file projects with inter-module imports work seamlessly.
+
+Also patches builtins.open / pathlib so that open("encrypted.json")
+transparently returns decrypted content -- zero code changes needed.
+"""
+
+from __future__ import annotations
+
+import builtins
+import importlib
+import importlib.abc
+import importlib.machinery
+import importlib.util
+import io
+import pathlib
+import sys
+import types
+from pathlib import Path
+
+from aloc.format import is_locked, MAGIC
+from aloc.fileops import read_bytes
+
+
+class AilockFinder(importlib.abc.MetaPathFinder):
+    """
+    A custom meta-path finder that intercepts import requests and checks
+    if the target .py file is an ailock-encrypted file. If so, it returns
+    an AilockLoader to decrypt and load the module in memory.
+    """
+
+    def __init__(self, search_dirs: list[Path], decrypt_fn):
+        """
+        Args:
+            search_dirs: Directories to search for encrypted modules.
+            decrypt_fn: callable(blob: bytes) -> bytes that decrypts an ailock blob.
+        """
+        self.search_dirs = search_dirs
+        self.decrypt_fn = decrypt_fn
+
+    def find_module(self, fullname: str, path=None):
+        """Legacy find_module for compatibility."""
+        spec = self.find_spec(fullname, path)
+        if spec is not None:
+            return spec.loader
+        return None
+
+    def find_spec(self, fullname, path, target=None):
+        """Find a module spec for the given module name."""
+        parts = fullname.split(".")
+
+        # Try each search directory
+        for base_dir in self.search_dirs:
+            # Try as a package (directory with __init__.py)
+            pkg_dir = base_dir / Path(*parts)
+            init_file = pkg_dir / "__init__.py"
+            if init_file.exists():
+                blob = read_bytes(init_file)
+                if is_locked(blob):
+                    loader = AilockLoader(init_file, self.decrypt_fn, is_package=True)
+                    spec = importlib.machinery.ModuleSpec(
+                        fullname, loader,
+                        origin=str(init_file),
+                        is_package=True,
+                    )
+                    spec.submodule_search_locations = [str(pkg_dir)]
+                    return spec
+
+            # Try as a plain module
+            if len(parts) == 1:
+                module_file = base_dir / f"{parts[0]}.py"
+            else:
+                module_file = base_dir / Path(*parts[:-1]) / f"{parts[-1]}.py"
+
+            if module_file.exists():
+                blob = read_bytes(module_file)
+                if is_locked(blob):
+                    loader = AilockLoader(module_file, self.decrypt_fn, is_package=False)
+                    spec = importlib.machinery.ModuleSpec(
+                        fullname, loader,
+                        origin=str(module_file),
+                    )
+                    return spec
+
+        return None
+
+
+class AilockLoader(importlib.abc.Loader):
+    """
+    Loads an ailock-encrypted Python file by decrypting it in memory
+    and compiling the source code.
+    """
+
+    def __init__(self, file_path: Path, decrypt_fn, is_package: bool = False):
+        self.file_path = file_path
+        self.decrypt_fn = decrypt_fn
+        self.is_package = is_package
+
+    def create_module(self, spec):
+        """Use default module creation semantics."""
+        return None
+
+    def exec_module(self, module):
+        """Decrypt file, compile source, and execute in module namespace."""
+        blob = read_bytes(self.file_path)
+        plaintext = self.decrypt_fn(blob)
+        source = plaintext.decode("utf-8")
+
+        # Compile and execute
+        code = compile(source, str(self.file_path), "exec")
+        exec(code, module.__dict__)
+
+
+def run_in_memory(
+    entry_file: Path,
+    password: str | None = None,
+    script_args: list[str] | None = None,
+    decrypt_fn=None,
+) -> int:
+    """
+    Execute an encrypted Python file entirely in memory.
+
+    Args:
+        entry_file: Path to the encrypted .py entry point.
+        password: Password for decryption (used if decrypt_fn not provided).
+        script_args: Arguments to pass to the script (sys.argv).
+        decrypt_fn: Optional custom decrypt function (blob -> plaintext bytes).
+                    If provided, password is ignored.
+
+    Returns:
+        Exit code (0 for success, 1 for error).
+    """
+    if decrypt_fn is None:
+        from aloc.cli import _decrypt_with_password
+        # Build the decrypt function (closure over password)
+        def decrypt_fn(blob: bytes) -> bytes:
+            return _decrypt_with_password(blob, password)
+
+    # Read and decrypt entry file
+    blob = read_bytes(entry_file)
+    if not is_locked(blob):
+        # Not encrypted - just exec it normally
+        source = blob.decode("utf-8")
+    else:
+        plaintext = decrypt_fn(blob)
+        source = plaintext.decode("utf-8")
+
+    # Set up search directories for the import hook
+    entry_dir = entry_file.resolve().parent
+    search_dirs = [entry_dir]
+
+    # Register our custom import finder (insert at beginning for priority)
+    finder = AilockFinder(search_dirs, decrypt_fn)
+    sys.meta_path.insert(0, finder)
+
+    # Add entry_dir to sys.path so non-encrypted imports work
+    # But remove any cached entries that might interfere
+    entry_dir_str = str(entry_dir)
+    if entry_dir_str not in sys.path:
+        sys.path.insert(0, entry_dir_str)
+
+    # Invalidate import caches so our finder takes priority
+    importlib.invalidate_caches()
+
+    # Patch builtins.open and pathlib for transparent file I/O
+    io_patch = AilockIOPatch(search_dirs, decrypt_fn)
+    io_patch.install()
+
+    # Set up sys.argv for the script
+    original_argv = sys.argv[:]
+    sys.argv = [str(entry_file)] + (script_args or [])
+
+    # Change working directory to entry file's directory
+    import os
+    original_cwd = os.getcwd()
+    os.chdir(entry_dir)
+
+    try:
+        # Compile and execute the entry file
+        code = compile(source, str(entry_file), "exec")
+        module = types.ModuleType("__main__")
+        module.__file__ = str(entry_file)
+        module.__loader__ = None
+        module.__spec__ = None
+        module.__builtins__ = __builtins__
+
+        # Replace __main__ temporarily
+        old_main = sys.modules.get("__main__")
+        sys.modules["__main__"] = module
+
+        exec(code, module.__dict__)
+        return 0
+
+    except SystemExit as e:
+        return e.code if isinstance(e.code, int) else (1 if e.code else 0)
+    except Exception as e:
+        print(f"error running {entry_file}: {type(e).__name__}: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+    finally:
+        # Restore state
+        sys.argv = original_argv
+        os.chdir(original_cwd)
+        if old_main is not None:
+            sys.modules["__main__"] = old_main
+        sys.meta_path.remove(finder)
+        io_patch.uninstall()
+        if entry_dir_str in sys.path:
+            sys.path.remove(entry_dir_str)
+
+
+# ---------------------------------------------------------------------------
+# Transparent file I/O patch
+# ---------------------------------------------------------------------------
+
+class AilockIOPatch:
+    """
+    Patches builtins.open and pathlib.Path.read_text/read_bytes
+    to transparently decrypt ailock files on read, and encrypt on write.
+    """
+
+    def __init__(self, search_dirs: list[Path], decrypt_fn):
+        self.search_dirs = search_dirs
+        self.decrypt_fn = decrypt_fn
+        self._original_open = None
+        self._original_read_text = None
+        self._original_read_bytes = None
+
+    def install(self):
+        """Install the patches."""
+        self._original_open = builtins.open
+        self._original_read_text = pathlib.Path.read_text
+        self._original_read_bytes = pathlib.Path.read_bytes
+
+        builtins.open = self._patched_open
+
+        # For pathlib methods, we need closures (not bound methods)
+        # because they get called as Path.read_text(self_path)
+        original_read_text = self._original_read_text
+        original_read_bytes = self._original_read_bytes
+        original_open = self._original_open
+        search_dirs = self.search_dirs
+        decrypt_fn = self.decrypt_fn
+
+        def patched_read_text(path_self, encoding="utf-8", errors=None):
+            p = path_self.resolve()
+            in_scope = any(str(p).startswith(str(d)) for d in search_dirs)
+            if in_scope and p.exists():
+                with original_open(p, "rb") as f:
+                    header = f.read(4)
+                if header == MAGIC:
+                    with original_open(p, "rb") as f:
+                        blob = f.read()
+                    plaintext = decrypt_fn(blob)
+                    return plaintext.decode(encoding)
+            return original_read_text(path_self, encoding=encoding, errors=errors)
+
+        def patched_read_bytes(path_self):
+            p = path_self.resolve()
+            in_scope = any(str(p).startswith(str(d)) for d in search_dirs)
+            if in_scope and p.exists():
+                with original_open(p, "rb") as f:
+                    header = f.read(4)
+                if header == MAGIC:
+                    with original_open(p, "rb") as f:
+                        blob = f.read()
+                    return decrypt_fn(blob)
+            return original_read_bytes(path_self)
+
+        pathlib.Path.read_text = patched_read_text
+        pathlib.Path.read_bytes = patched_read_bytes
+
+    def uninstall(self):
+        """Remove the patches."""
+        if self._original_open is not None:
+            builtins.open = self._original_open
+        if self._original_read_text is not None:
+            pathlib.Path.read_text = self._original_read_text
+        if self._original_read_bytes is not None:
+            pathlib.Path.read_bytes = self._original_read_bytes
+
+    def _is_encrypted_file(self, filepath) -> bool:
+        """Check if a file path points to an ailock-encrypted file."""
+        try:
+            p = Path(filepath)
+            if not p.is_absolute():
+                # Resolve relative to search dirs
+                for d in self.search_dirs:
+                    candidate = d / p
+                    if candidate.exists():
+                        p = candidate
+                        break
+                else:
+                    p = p.resolve()
+            else:
+                p = p.resolve()
+
+            if not p.exists() or not p.is_file():
+                return False
+            # Only intercept files within our search dirs
+            in_scope = any(
+                str(p).startswith(str(d)) for d in self.search_dirs
+            )
+            if not in_scope:
+                return False
+            with self._original_open(p, "rb") as f:
+                header = f.read(4)
+            return header == MAGIC
+        except (OSError, TypeError):
+            return False
+
+    def _decrypt_file(self, filepath) -> bytes:
+        """Read and decrypt a file, returning plaintext bytes."""
+        p = Path(filepath)
+        if not p.is_absolute():
+            for d in self.search_dirs:
+                candidate = d / p
+                if candidate.exists():
+                    p = candidate
+                    break
+            else:
+                p = p.resolve()
+        else:
+            p = p.resolve()
+        with self._original_open(p, "rb") as f:
+            blob = f.read()
+        return self.decrypt_fn(blob)
+
+    def _patched_open(self, file, mode="r", *args, **kwargs):
+        """Patched open() that transparently decrypts ailock files."""
+        # Only intercept read modes on encrypted files
+        if isinstance(file, (str, Path, pathlib.PurePath)):
+            mode_str = mode if isinstance(mode, str) else "r"
+            is_read = "r" in mode_str and "w" not in mode_str and "a" not in mode_str
+
+            if is_read and self._is_encrypted_file(file):
+                # Skip .py files - those are handled by the import hook
+                filepath_str = str(file)
+                if filepath_str.endswith(".py"):
+                    # Check if this call is from the import system
+                    # by inspecting the call stack
+                    import traceback as _tb
+                    frame_info = _tb.extract_stack(limit=6)
+                    from_import = any(
+                        "importlib" in f.filename or "linecache" in f.filename
+                        for f in frame_info
+                    )
+                    if from_import:
+                        return self._original_open(file, mode, *args, **kwargs)
+
+                plaintext = self._decrypt_file(file)
+                if "b" in mode_str:
+                    return io.BytesIO(plaintext)
+                else:
+                    encoding = kwargs.get("encoding", "utf-8")
+                    return io.StringIO(plaintext.decode(encoding))
+
+        return self._original_open(file, mode, *args, **kwargs)
+

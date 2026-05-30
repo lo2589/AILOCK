@@ -41,12 +41,22 @@ def _install_dir() -> Path:
 
 
 def write_launcher(target: Path) -> None:
-    """Write a platform-specific launcher script."""
+    """Write platform-specific launcher scripts."""
     if sys.platform == "win32":
-        # Windows .cmd wrapper
-        content = '@echo off\r\npython -m aloc %*\r\n'
-        target = target.with_suffix(".cmd")
-        target.write_text(content, encoding="utf-8")
+        # CMD wrapper (for cmd.exe)
+        cmd_content = '@echo off\r\npython -m aloc %*\r\n'
+        cmd_target = target.with_suffix(".cmd")
+        cmd_target.write_text(cmd_content, encoding="utf-8")
+
+        # PowerShell wrapper (for pwsh / Windows PowerShell)
+        ps1_content = (
+            '#!/usr/bin/env pwsh\n'
+            '# AiLock PowerShell launcher\n'
+            'python -m aloc @args\n'
+            'exit $LASTEXITCODE\n'
+        )
+        ps1_target = target.with_suffix(".ps1")
+        ps1_target.write_text(ps1_content, encoding="utf-8")
     else:
         # Unix bash wrapper
         content = '#!/usr/bin/env bash\nexec python3 -m aloc "$@"\n'
@@ -66,6 +76,8 @@ def install_as(name: str) -> str:
     # Resolve actual path (may have .cmd suffix on Windows)
     if sys.platform == "win32":
         actual = target.with_suffix(".cmd")
+        ps1 = target.with_suffix(".ps1")
+        return f"{actual} + {ps1}"
     else:
         actual = target
 

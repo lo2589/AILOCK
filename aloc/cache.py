@@ -5,6 +5,8 @@ Caches derived project keys in temp files with TTL expiry.
 No background agent required.
 """
 
+from __future__ import annotations
+
 import base64
 import hashlib
 import json
@@ -75,6 +77,45 @@ def cache_get_project_key(pid: str) -> bytes | None:
         return base64.b64decode(data["key"])
     except (KeyError, ValueError):
         return None
+
+
+def cache_get_password(pid: str) -> str | None:
+    """Read cached password if it exists and hasn't expired."""
+    path = _cache_file(pid + "-pw")
+
+    if not path.exists():
+        return None
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    if time.time() > data.get("expires_at", 0):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return None
+
+    return data.get("password")
+
+
+def cache_store_password(pid: str, password: str, ttl: int = 300) -> None:
+    """Store password in cache with TTL."""
+    path = _cache_file(pid + "-pw")
+
+    data = {
+        "password": password,
+        "expires_at": time.time() + ttl,
+    }
+
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    try:
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
 
 
 def cache_store_project_key(pid: str, key: bytes, ttl: int = 300) -> None:

@@ -36,25 +36,41 @@ grep "password" .        # 搜不到明文
 ailock run main.py       # 正常运行加密代码
 ```
 
-## 安装
+## 环境要求
 
-在仓库目录中：
+- Python 3.11 或更高版本
+- `pip`
+- 运行依赖会从 `pyproject.toml` 自动安装：`argon2-cffi`、`cryptography`、`pyzipper`
+- `ailock open` 需要 `tkinter`；很多 Python 发行版自带，部分 Linux 发行版需要单独安装 `python3-tk`
+
+## 安装指南
+
+从 GitHub 安装：
 
 ```bash
+git clone https://github.com/lo2589/AILOCK.git
+cd AILOCK
 pip install .
 ```
 
-开发模式：
+开发模式安装：
 
 ```bash
+git clone https://github.com/lo2589/AILOCK.git
+cd AILOCK
 pip install -e .
-python -m aloc --help
 ```
 
-安装后命令为：
+检查命令：
 
 ```bash
 ailock --help
+```
+
+如果 `ailock` 不在 `PATH` 中，也可以用模块入口：
+
+```bash
+python -m aloc --help
 ```
 
 ## 快速开始
@@ -242,7 +258,7 @@ aloc/
   install.py    自定义命令名安装
 ```
 
-## 依赖
+## 依赖摘要
 
 - `argon2-cffi`
 - `cryptography`

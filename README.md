@@ -30,25 +30,43 @@ is decrypted back onto disk. AiLock is built for a different workflow:
 - **Recovery path**: encrypted backups and optional recovery keys help recover
   damaged or forgotten-password files.
 
-## Install
+## Requirements
 
-From the repository:
+- Python 3.11 or newer
+- `pip`
+- Runtime packages installed automatically from `pyproject.toml`:
+  `argon2-cffi`, `cryptography`, and `pyzipper`
+- `tkinter` for `ailock open`; it is bundled with many Python installations, but
+  some Linux distributions package it separately as `python3-tk`
+
+## Installation
+
+Install from GitHub:
 
 ```bash
+git clone https://github.com/lo2589/AILOCK.git
+cd AILOCK
 pip install .
 ```
 
-For development:
+For editable development installs:
 
 ```bash
+git clone https://github.com/lo2589/AILOCK.git
+cd AILOCK
 pip install -e .
-python -m aloc --help
 ```
 
-The installed command is:
+Check the command:
 
 ```bash
 ailock --help
+```
+
+If the command is not on your `PATH`, use the module entry point:
+
+```bash
+python -m aloc --help
 ```
 
 ## Quick Start
@@ -255,7 +273,7 @@ aloc/
   install.py    custom command-name launcher
 ```
 
-## Dependencies
+## Dependency Summary
 
 - `argon2-cffi`
 - `cryptography`

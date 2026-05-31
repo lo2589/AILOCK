@@ -15,6 +15,7 @@ import stat
 import subprocess
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 
@@ -41,10 +42,38 @@ def project_id() -> str:
 
 
 def _cache_dir() -> Path:
-    """Get the cache directory path."""
-    base = Path(tempfile.gettempdir()) / "aloc-cache"
-    base.mkdir(parents=True, exist_ok=True)
-    return base
+    """Get a writable cache directory path."""
+    candidates = []
+
+    for var in ("TMPDIR", "TEMP", "TMP"):
+        value = os.environ.get(var)
+        if value:
+            candidates.append(Path(value) / "aloc-cache")
+
+    candidates.append(Path(tempfile.gettempdir()) / "aloc-cache")
+
+    if os.name == "nt":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            candidates.append(Path(local_app_data) / "AiLock" / "cache")
+
+    candidates.append(Path.home() / ".ailock" / "cache")
+
+    last_error = None
+    for base in candidates:
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+            probe = base / f".write-test-{os.getpid()}-{uuid.uuid4().hex}"
+            probe.write_text("", encoding="utf-8")
+            try:
+                probe.unlink()
+            except OSError:
+                pass
+            return base
+        except OSError as e:
+            last_error = e
+
+    raise OSError(f"no writable AiLock cache directory found: {last_error}")
 
 
 def _cache_file(pid: str) -> Path:

@@ -12,7 +12,7 @@ runtime process, not written back to the working tree.
 > Disk: ciphertext for AI and ordinary file readers.
 > Runtime: plaintext only inside the controlled execution process.
 
-[Chinese README](README_zn.md)
+[Chinese README](README_zh.md)
 
 ## Why AiLock?
 

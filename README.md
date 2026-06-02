@@ -12,6 +12,8 @@ runtime process, not written back to the working tree.
 > Disk: ciphertext for AI and ordinary file readers.
 > Runtime: plaintext only inside the controlled execution process.
 
+Tested in Windows and macOS development scenarios.
+
 [Chinese README](README_zh.md)
 
 ## Why AiLock?
@@ -38,6 +40,7 @@ is decrypted back onto disk. AiLock is built for a different workflow:
   `argon2-cffi`, `cryptography`, and `pyzipper`
 - `tkinter` for `ailock open`; it is bundled with many Python installations, but
   some Linux distributions package it separately as `python3-tk`
+- Windows and macOS are the primary tested desktop development environments.
 
 ## Installation
 

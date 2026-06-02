@@ -15,6 +15,8 @@ AiLock 的重点不是“把文件加密后就不能用了”，而是：
 
 English README: [README.md](README.md)
 
+已在 Windows 和 macOS 开发场景下测试。
+
 ## 核心卖点：可运行加密代码
 
 普通加密工具通常会让代码在解密前不可运行。AiLock 的目标不同：
@@ -42,6 +44,7 @@ ailock run main.py       # 正常运行加密代码
 - `pip`
 - 运行依赖会从 `pyproject.toml` 自动安装：`argon2-cffi`、`cryptography`、`pyzipper`
 - `ailock open` 需要 `tkinter`；很多 Python 发行版自带，部分 Linux 发行版需要单独安装 `python3-tk`
+- 主要测试桌面开发环境为 Windows 和 macOS。
 
 ## 安装指南
 

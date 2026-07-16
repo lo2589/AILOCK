@@ -456,6 +456,40 @@ def _decrypt_with_password(blob: bytes, password: str) -> bytes:
         raise ValueError(f"unsupported file version: {version}")
 
 
+def _reencrypt_with_password(
+    blob: bytes,
+    plaintext: bytes,
+    password: str,
+    path: Path | None = None,
+) -> bytes:
+    """Re-encrypt edited plaintext while preserving the existing key wraps."""
+    version = get_version(blob)
+    header, _ = parse_locked_file(blob)
+    salt = base64.b64decode(header["salt"])
+
+    metadata = dict(header.get("meta") or {})
+    metadata["mtime"] = int(time.time())
+    if path is not None:
+        metadata["filename"] = path.name
+        if path.exists():
+            metadata["mode"] = path.stat().st_mode
+
+    updated_header = dict(header)
+
+    if version == VERSION_V1:
+        project_key = derive_project_key(password, salt)
+        nonce, ciphertext = encrypt_payload(project_key, plaintext, metadata)
+    elif version == VERSION_V2:
+        password_key = derive_project_key(password, salt)
+        file_key = _unwrap_with_password_key(header, password_key)
+        nonce, ciphertext = encrypt_payload_v2(file_key, plaintext, metadata)
+    else:
+        raise ValueError(f"unsupported file version: {version}")
+
+    updated_header["nonce"] = base64.b64encode(nonce).decode("ascii")
+    return encode_file(updated_header, ciphertext, version=version)
+
+
 def _decrypt_with_cache(blob: bytes, args) -> bytes:
     """Common decrypt logic with cache + version dispatch."""
     version = get_version(blob)

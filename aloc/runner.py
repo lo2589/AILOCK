@@ -22,7 +22,7 @@ import types
 from pathlib import Path
 
 from aloc.format import is_locked, MAGIC
-from aloc.fileops import read_bytes
+from aloc.fileops import atomic_write, read_bytes
 
 
 class AilockFinder(importlib.abc.MetaPathFinder):
@@ -119,16 +119,18 @@ def run_in_memory(
     password: str | None = None,
     script_args: list[str] | None = None,
     decrypt_fn=None,
+    encrypt_fn=None,
 ) -> int:
     """
     Execute an encrypted Python file entirely in memory.
 
     Args:
         entry_file: Path to the encrypted .py entry point.
-        password: Password for decryption (used if decrypt_fn not provided).
+        password: Password for default decryption and encrypted writeback.
         script_args: Arguments to pass to the script (sys.argv).
         decrypt_fn: Optional custom decrypt function (blob -> plaintext bytes).
-                    If provided, password is ignored.
+        encrypt_fn: Optional custom re-encrypt function
+                    (original_blob, plaintext, path -> encrypted blob).
 
     Returns:
         Exit code (0 for success, 1 for error).
@@ -138,6 +140,12 @@ def run_in_memory(
         # Build the decrypt function (closure over password)
         def decrypt_fn(blob: bytes) -> bytes:
             return _decrypt_with_password(blob, password)
+
+    if encrypt_fn is None and password is not None:
+        from aloc.cli import _reencrypt_with_password
+
+        def encrypt_fn(blob: bytes, plaintext: bytes, path: Path) -> bytes:
+            return _reencrypt_with_password(blob, plaintext, password, path)
 
     # Read and decrypt entry file
     blob = read_bytes(entry_file)
@@ -166,7 +174,7 @@ def run_in_memory(
     importlib.invalidate_caches()
 
     # Patch builtins.open and pathlib for transparent file I/O
-    io_patch = AilockIOPatch(search_dirs, decrypt_fn)
+    io_patch = AilockIOPatch(search_dirs, decrypt_fn, encrypt_fn=encrypt_fn)
     io_patch.install()
 
     # Set up sys.argv for the script
@@ -217,52 +225,160 @@ def run_in_memory(
 # Transparent file I/O patch
 # ---------------------------------------------------------------------------
 
+
+class _EncryptedWritebackMixin:
+    """Commit an in-memory plaintext stream as encrypted bytes."""
+
+    def _configure_writeback(
+        self,
+        path: Path,
+        mode: str,
+        original_blob: bytes,
+        encrypt_fn,
+        *,
+        dirty: bool = False,
+    ) -> None:
+        self.name = str(path)
+        self.mode = mode
+        self._writeback_path = path
+        self._writeback_blob = original_blob
+        self._writeback_encrypt_fn = encrypt_fn
+        self._writeback_dirty = dirty
+        self._writeback_append = "a" in mode
+
+    def _plaintext_bytes(self) -> bytes:
+        raise NotImplementedError
+
+    def _commit_encrypted(self) -> None:
+        if not self._writeback_dirty:
+            return
+        encrypted = self._writeback_encrypt_fn(
+            self._writeback_blob,
+            self._plaintext_bytes(),
+            self._writeback_path,
+        )
+        if not isinstance(encrypted, bytes) or not is_locked(encrypted):
+            raise ValueError("encrypt_fn did not return a valid AiLock blob")
+        atomic_write(self._writeback_path, encrypted)
+        self._writeback_blob = encrypted
+        self._writeback_dirty = False
+
+    def flush(self):
+        if self.closed:
+            raise ValueError("I/O operation on closed file")
+        self._commit_encrypted()
+        return super().flush()
+
+    def close(self):
+        if not self.closed:
+            try:
+                self._commit_encrypted()
+            finally:
+                super().close()
+
+
+class _EncryptedBytesBuffer(_EncryptedWritebackMixin, io.BytesIO):
+    def __init__(self, initial: bytes, **writeback) -> None:
+        io.BytesIO.__init__(self, initial)
+        self._configure_writeback(**writeback)
+
+    def _plaintext_bytes(self) -> bytes:
+        return self.getvalue()
+
+    def write(self, data):
+        if self._writeback_append:
+            self.seek(0, io.SEEK_END)
+        written = super().write(data)
+        self._writeback_dirty = True
+        return written
+
+    def truncate(self, size=None):
+        result = super().truncate(size)
+        self._writeback_dirty = True
+        return result
+
+
+class _EncryptedTextBuffer(_EncryptedWritebackMixin, io.StringIO):
+    def __init__(
+        self,
+        initial: str,
+        *,
+        encoding: str,
+        errors: str,
+        newline,
+        **writeback,
+    ) -> None:
+        io.StringIO.__init__(self, initial, newline=newline)
+        self._writeback_encoding = encoding
+        self._writeback_errors = errors
+        self._configure_writeback(**writeback)
+
+    def _plaintext_bytes(self) -> bytes:
+        return self.getvalue().encode(
+            self._writeback_encoding,
+            errors=self._writeback_errors,
+        )
+
+    def write(self, text):
+        if self._writeback_append:
+            self.seek(0, io.SEEK_END)
+        written = super().write(text)
+        self._writeback_dirty = True
+        return written
+
+    def truncate(self, size=None):
+        result = super().truncate(size)
+        self._writeback_dirty = True
+        return result
+
+
 class AilockIOPatch:
     """
     Patches builtins.open and pathlib.Path.read_text/read_bytes
     to transparently decrypt ailock files on read, and encrypt on write.
     """
 
-    def __init__(self, search_dirs: list[Path], decrypt_fn):
-        self.search_dirs = search_dirs
+    def __init__(self, search_dirs: list[Path], decrypt_fn, encrypt_fn=None):
+        self.search_dirs = [Path(directory).resolve() for directory in search_dirs]
         self.decrypt_fn = decrypt_fn
+        self.encrypt_fn = encrypt_fn
         self._original_open = None
+        self._original_io_open = None
         self._original_read_text = None
         self._original_read_bytes = None
 
     def install(self):
         """Install the patches."""
         self._original_open = builtins.open
+        self._original_io_open = io.open
         self._original_read_text = pathlib.Path.read_text
         self._original_read_bytes = pathlib.Path.read_bytes
 
         builtins.open = self._patched_open
+        io.open = self._patched_open
 
         # For pathlib methods, we need closures (not bound methods)
         # because they get called as Path.read_text(self_path)
         original_read_text = self._original_read_text
         original_read_bytes = self._original_read_bytes
         original_open = self._original_open
-        search_dirs = self.search_dirs
         decrypt_fn = self.decrypt_fn
 
         def patched_read_text(path_self, encoding="utf-8", errors=None):
             p = path_self.resolve()
-            in_scope = any(str(p).startswith(str(d)) for d in search_dirs)
-            if in_scope and p.exists():
+            if self._is_in_scope(p) and p.exists():
                 with original_open(p, "rb") as f:
                     header = f.read(4)
                 if header == MAGIC:
                     with original_open(p, "rb") as f:
                         blob = f.read()
                     plaintext = decrypt_fn(blob)
-                    return plaintext.decode(encoding)
+                    return plaintext.decode(encoding or "utf-8", errors=errors or "strict")
             return original_read_text(path_self, encoding=encoding, errors=errors)
 
         def patched_read_bytes(path_self):
             p = path_self.resolve()
-            in_scope = any(str(p).startswith(str(d)) for d in search_dirs)
-            if in_scope and p.exists():
+            if self._is_in_scope(p) and p.exists():
                 with original_open(p, "rb") as f:
                     header = f.read(4)
                 if header == MAGIC:
@@ -278,34 +394,42 @@ class AilockIOPatch:
         """Remove the patches."""
         if self._original_open is not None:
             builtins.open = self._original_open
+        if self._original_io_open is not None:
+            io.open = self._original_io_open
         if self._original_read_text is not None:
             pathlib.Path.read_text = self._original_read_text
         if self._original_read_bytes is not None:
             pathlib.Path.read_bytes = self._original_read_bytes
 
+    def _is_in_scope(self, path: Path) -> bool:
+        """Return True only when path is contained by a configured root."""
+        for directory in self.search_dirs:
+            try:
+                path.relative_to(directory)
+                return True
+            except ValueError:
+                continue
+        return False
+
+    def _resolve_file_path(self, filepath) -> Path:
+        path = Path(filepath)
+        if path.is_absolute():
+            return path.resolve()
+        for directory in self.search_dirs:
+            candidate = directory / path
+            if candidate.exists():
+                return candidate.resolve()
+        return path.resolve()
+
     def _is_encrypted_file(self, filepath) -> bool:
         """Check if a file path points to an ailock-encrypted file."""
         try:
-            p = Path(filepath)
-            if not p.is_absolute():
-                # Resolve relative to search dirs
-                for d in self.search_dirs:
-                    candidate = d / p
-                    if candidate.exists():
-                        p = candidate
-                        break
-                else:
-                    p = p.resolve()
-            else:
-                p = p.resolve()
+            p = self._resolve_file_path(filepath)
 
             if not p.exists() or not p.is_file():
                 return False
             # Only intercept files within our search dirs
-            in_scope = any(
-                str(p).startswith(str(d)) for d in self.search_dirs
-            )
-            if not in_scope:
+            if not self._is_in_scope(p):
                 return False
             with self._original_open(p, "rb") as f:
                 header = f.read(4)
@@ -315,29 +439,87 @@ class AilockIOPatch:
 
     def _decrypt_file(self, filepath) -> bytes:
         """Read and decrypt a file, returning plaintext bytes."""
-        p = Path(filepath)
-        if not p.is_absolute():
-            for d in self.search_dirs:
-                candidate = d / p
-                if candidate.exists():
-                    p = candidate
-                    break
-            else:
-                p = p.resolve()
-        else:
-            p = p.resolve()
+        p = self._resolve_file_path(filepath)
         with self._original_open(p, "rb") as f:
             blob = f.read()
         return self.decrypt_fn(blob)
 
+    @staticmethod
+    def _text_options(args, kwargs) -> tuple[str, str, str | None]:
+        """Extract text options from open() positional and keyword arguments."""
+        encoding = kwargs.get("encoding")
+        errors = kwargs.get("errors")
+        newline = kwargs.get("newline")
+        if len(args) > 1 and encoding is None:
+            encoding = args[1]
+        if len(args) > 2 and errors is None:
+            errors = args[2]
+        if len(args) > 3 and newline is None:
+            newline = args[3]
+        return encoding or "utf-8", errors or "strict", newline
+
+    def _open_encrypted_for_write(self, file, mode, args, kwargs):
+        """Return a plaintext buffer that encrypts atomically on flush/close."""
+        if "x" in mode:
+            # The encrypted target already exists, so preserve open(..., "x")
+            # behavior and let the real open raise FileExistsError.
+            return self._original_open(file, mode, *args, **kwargs)
+        if self.encrypt_fn is None:
+            raise PermissionError(
+                "encrypted file is read-only: no secure encrypt_fn is configured"
+            )
+        if kwargs.get("opener") is not None:
+            raise ValueError("custom opener is not supported for encrypted files")
+        if kwargs.get("closefd") is False:
+            raise ValueError("Cannot use closefd=False with encrypted file name")
+
+        path = self._resolve_file_path(file)
+        with self._original_open(path, "rb") as stream:
+            original_blob = stream.read()
+
+        plaintext = b"" if "w" in mode else self.decrypt_fn(original_blob)
+        writeback = {
+            "path": path,
+            "mode": mode,
+            "original_blob": original_blob,
+            "encrypt_fn": self.encrypt_fn,
+            # Always commit writable in-memory streams on close. This also
+            # captures mutations made through BytesIO.getbuffer().
+            "dirty": True,
+        }
+
+        if "b" in mode:
+            if any(kwargs.get(name) is not None for name in ("encoding", "errors", "newline")):
+                raise ValueError("binary mode doesn't take an encoding, errors, or newline")
+            buffer = _EncryptedBytesBuffer(plaintext, **writeback)
+        else:
+            encoding, errors, newline = self._text_options(args, kwargs)
+            text = plaintext.decode(encoding, errors=errors)
+            buffer = _EncryptedTextBuffer(
+                text,
+                encoding=encoding,
+                errors=errors,
+                newline=newline,
+                **writeback,
+            )
+
+        if "a" in mode:
+            buffer.seek(0, io.SEEK_END)
+        else:
+            buffer.seek(0)
+        return buffer
+
     def _patched_open(self, file, mode="r", *args, **kwargs):
-        """Patched open() that transparently decrypts ailock files."""
-        # Only intercept read modes on encrypted files
+        """Decrypt reads and atomically re-encrypt writes to AiLock files."""
         if isinstance(file, (str, Path, pathlib.PurePath)):
             mode_str = mode if isinstance(mode, str) else "r"
-            is_read = "r" in mode_str and "w" not in mode_str and "a" not in mode_str
+            encrypted = self._is_encrypted_file(file)
+            has_write = any(flag in mode_str for flag in ("w", "a", "x", "+"))
 
-            if is_read and self._is_encrypted_file(file):
+            if encrypted and has_write:
+                return self._open_encrypted_for_write(file, mode_str, args, kwargs)
+
+            if encrypted:
                 # Skip .py files - those are handled by the import hook
                 filepath_str = str(file)
                 if filepath_str.endswith(".py"):
@@ -356,8 +538,10 @@ class AilockIOPatch:
                 if "b" in mode_str:
                     return io.BytesIO(plaintext)
                 else:
-                    encoding = kwargs.get("encoding", "utf-8")
-                    return io.StringIO(plaintext.decode(encoding))
+                    encoding, errors, newline = self._text_options(args, kwargs)
+                    return io.StringIO(
+                        plaintext.decode(encoding, errors=errors),
+                        newline=newline,
+                    )
 
         return self._original_open(file, mode, *args, **kwargs)
-

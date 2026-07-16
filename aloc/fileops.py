@@ -1,5 +1,6 @@
 import os
 import random
+import stat
 from pathlib import Path
 
 
@@ -11,6 +12,11 @@ def read_bytes(path: Path) -> bytes:
 def atomic_write(path: Path, data: bytes) -> None:
     rand_id = "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=8))
     tmp = path.with_name(f".{path.name}.tmp-{rand_id}")
+    existing_mode = None
+    try:
+        existing_mode = stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        pass
 
     try:
         with open(tmp, "wb") as f:
@@ -18,6 +24,8 @@ def atomic_write(path: Path, data: bytes) -> None:
             f.flush()
             os.fsync(f.fileno())
 
+        if existing_mode is not None:
+            os.chmod(tmp, existing_mode)
         os.replace(tmp, path)
     except Exception:
         try:

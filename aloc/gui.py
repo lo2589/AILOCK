@@ -33,6 +33,7 @@ class AilockEditor:
         self.current_file: Path | None = None
         self.current_is_locked = False
         self._modified = False
+        self._load_generation = 0
 
         self.root.title(f"AiLock - {self.directory.name}/")
         self.root.geometry("900x600")
@@ -169,6 +170,8 @@ class AilockEditor:
                 self._do_save()
 
         self.current_file = file_path
+        self._load_generation += 1
+        load_generation = self._load_generation
         self._modified = False
         self.text.edit_modified(False)
 
@@ -184,7 +187,11 @@ class AilockEditor:
             self.file_label.config(text=f"{file_path.name} [locked]")
 
             # Decrypt in background thread
-            thread = threading.Thread(target=self._decrypt_async, args=(blob,), daemon=True)
+            thread = threading.Thread(
+                target=self._decrypt_async,
+                args=(file_path, blob, load_generation),
+                daemon=True,
+            )
             thread.start()
         else:
             self.current_is_locked = False
@@ -197,7 +204,7 @@ class AilockEditor:
             self.file_label.config(text=f"{file_path.name} [plain]")
             self._set_status("Ready")
 
-    def _decrypt_async(self, blob: bytes):
+    def _decrypt_async(self, path: Path, blob: bytes, load_generation: int):
         """Decrypt file in background thread."""
         from aloc.cli import _decrypt_with_password
 
@@ -206,10 +213,51 @@ class AilockEditor:
             plaintext = _decrypt_with_password(blob, self.password)
             content = plaintext.decode("utf-8")
             elapsed = time.time() - t0
-            self.root.after(0, self._display_content, content)
-            self.root.after(0, self._set_status, f"Decrypted in {elapsed:.2f}s")
+            self.root.after(
+                0,
+                self._display_decrypted_content,
+                path,
+                load_generation,
+                content,
+                elapsed,
+            )
         except Exception as e:
-            self.root.after(0, self._display_error, str(e))
+            self.root.after(
+                0,
+                self._display_decrypt_error,
+                path,
+                load_generation,
+                str(e),
+            )
+
+    def _is_current_load(self, path: Path, load_generation: int) -> bool:
+        return (
+            self.current_file == path
+            and self._load_generation == load_generation
+        )
+
+    def _display_decrypted_content(
+        self,
+        path: Path,
+        load_generation: int,
+        content: str,
+        elapsed: float,
+    ):
+        """Apply a background result only to the selection that requested it."""
+        if not self._is_current_load(path, load_generation):
+            return
+        self._display_content(content)
+        self._set_status(f"Decrypted in {elapsed:.2f}s")
+
+    def _display_decrypt_error(
+        self,
+        path: Path,
+        load_generation: int,
+        error_msg: str,
+    ):
+        if not self._is_current_load(path, load_generation):
+            return
+        self._display_error(error_msg)
 
     def _display_content(self, content: str):
         """Update text widget with decrypted content (must run on main thread)."""

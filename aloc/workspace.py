@@ -382,11 +382,6 @@ class DecryptedWorkspace:
 
     def _flush_entry(self, entry: FileEntry):
         """Write a single entry back to disk."""
-        from aloc.crypto import (
-            derive_project_key, generate_file_key,
-            encrypt_payload_v2, wrap_key,
-        )
-
         normalized, resolved = self._resolve_rel_path(entry.rel_path)
         entry.rel_path = normalized
         entry.abs_path = resolved
@@ -401,36 +396,61 @@ class DecryptedWorkspace:
         data = entry.content.encode("utf-8")
 
         if entry.is_locked:
-            # Re-encrypt
-            salt = os.urandom(16)
-            file_key = generate_file_key()
-            metadata = {
-                "filename": entry.abs_path.name,
-                "mode": entry.abs_path.stat().st_mode if entry.abs_path.exists() else 0o644,
-                "mtime": int(time.time()),
-            }
-            nonce, ciphertext = encrypt_payload_v2(file_key, data, metadata)
+            original_blob = (
+                read_bytes(entry.abs_path) if entry.abs_path.exists() else None
+            )
+            if original_blob is not None and is_locked(original_blob):
+                from aloc.cli import _reencrypt_with_password
 
-            pw_key = derive_project_key(self.password, salt)
-            pw_nonce, pw_wrapped = wrap_key(pw_key, file_key)
+                blob = _reencrypt_with_password(
+                    original_blob,
+                    data,
+                    self.password,
+                    entry.abs_path,
+                )
+            else:
+                # New workspace files do not have an existing file key or
+                # recovery wrap, so create their initial password wrap.
+                from aloc.crypto import (
+                    derive_project_key,
+                    generate_file_key,
+                    encrypt_payload_v2,
+                    wrap_key,
+                )
 
-            header = {
-                "kdf": "argon2id",
-                "aead": "chacha20poly1305",
-                "salt": base64.b64encode(salt).decode("ascii"),
-                "nonce": base64.b64encode(nonce).decode("ascii"),
-                "key_wraps": [
-                    {
-                        "type": "password",
-                        "nonce": base64.b64encode(pw_nonce).decode("ascii"),
-                        "wrapped": base64.b64encode(pw_wrapped).decode("ascii"),
-                    }
-                ],
-                "meta": metadata,
-            }
-            blob = encode_file(header, ciphertext)
+                salt = os.urandom(16)
+                file_key = generate_file_key()
+                metadata = {
+                    "filename": entry.abs_path.name,
+                    "mode": 0o644,
+                    "mtime": int(time.time()),
+                }
+                nonce, ciphertext = encrypt_payload_v2(file_key, data, metadata)
+                pw_key = derive_project_key(self.password, salt)
+                pw_nonce, pw_wrapped = wrap_key(pw_key, file_key)
+                header = {
+                    "kdf": "argon2id",
+                    "aead": "chacha20poly1305",
+                    "salt": base64.b64encode(salt).decode("ascii"),
+                    "nonce": base64.b64encode(nonce).decode("ascii"),
+                    "key_wraps": [
+                        {
+                            "type": "password",
+                            "nonce": base64.b64encode(pw_nonce).decode("ascii"),
+                            "wrapped": base64.b64encode(pw_wrapped).decode("ascii"),
+                        }
+                    ],
+                    "meta": metadata,
+                }
+                blob = encode_file(header, ciphertext)
             entry.abs_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write(entry.abs_path, blob)
+            from aloc.manifest import compute_hash, get_rel_path, update_locked_hash
+
+            update_locked_hash(
+                get_rel_path(entry.abs_path),
+                compute_hash(blob),
+            )
         else:
             # Plain file
             entry.abs_path.parent.mkdir(parents=True, exist_ok=True)

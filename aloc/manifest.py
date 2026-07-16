@@ -176,6 +176,18 @@ def unregister_lock(rel_path: str) -> None:
     save_manifest(manifest)
 
 
+def update_locked_hash(rel_path: str, locked_hash: str) -> bool:
+    """Refresh a tracked file's ciphertext hash after an encrypted edit."""
+    manifest = load_manifest()
+    entry = manifest["files"].get(rel_path)
+    if entry is None:
+        return False
+    entry["locked_hash"] = locked_hash
+    entry["updated_at"] = int(time.time())
+    save_manifest(manifest)
+    return True
+
+
 def list_locked_files(prefix: Optional[str] = None) -> list:
     """
     List all locked file paths.

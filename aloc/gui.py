@@ -262,45 +262,26 @@ class AilockEditor:
 
     def _save_async(self, path: Path, data: bytes, encrypt: bool):
         """Save (and optionally re-encrypt) in background thread."""
-        import base64
-        from aloc.crypto import (
-            derive_project_key, generate_file_key,
-            encrypt_payload_v2, wrap_key,
-        )
-        from aloc.format import encode_file
-
         try:
             if encrypt:
-                # Re-encrypt with the same password
-                salt = os.urandom(16)
-                file_key = generate_file_key()
-                metadata = {
-                    "filename": path.name,
-                    "mode": path.stat().st_mode if path.exists() else 0o644,
-                    "mtime": int(time.time()),
-                }
-                nonce, ciphertext = encrypt_payload_v2(file_key, data, metadata)
+                from aloc.cli import _reencrypt_with_password
+                from aloc.manifest import (
+                    compute_hash,
+                    get_rel_path,
+                    update_locked_hash,
+                )
 
-                pw_key = derive_project_key(self.password, salt)
-                pw_nonce, pw_wrapped = wrap_key(pw_key, file_key)
-
-                header = {
-                    "kdf": "argon2id",
-                    "aead": "chacha20poly1305",
-                    "salt": base64.b64encode(salt).decode("ascii"),
-                    "nonce": base64.b64encode(nonce).decode("ascii"),
-                    "key_wraps": [
-                        {
-                            "type": "password",
-                            "nonce": base64.b64encode(pw_nonce).decode("ascii"),
-                            "wrapped": base64.b64encode(pw_wrapped).decode("ascii"),
-                        }
-                    ],
-                    "meta": metadata,
-                }
-
-                blob = encode_file(header, ciphertext)
+                original_blob = read_bytes(path)
+                if not is_locked(original_blob):
+                    raise ValueError(f"file is no longer locked: {path}")
+                blob = _reencrypt_with_password(
+                    original_blob,
+                    data,
+                    self.password,
+                    path,
+                )
                 atomic_write(path, blob)
+                update_locked_hash(get_rel_path(path), compute_hash(blob))
             else:
                 # Plain file, just write
                 atomic_write(path, data)

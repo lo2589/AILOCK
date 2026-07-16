@@ -201,6 +201,7 @@ class DecryptedWorkspace:
             content: New file content.
         """
         self._ensure_loaded()
+        rel_path, abs_path = self._resolve_rel_path(rel_path)
 
         if rel_path in self._files:
             entry = self._files[rel_path]
@@ -208,7 +209,6 @@ class DecryptedWorkspace:
             entry.dirty = True
         else:
             # New file
-            abs_path = self.directory / rel_path
             entry = FileEntry(
                 rel_path=rel_path,
                 abs_path=abs_path,
@@ -315,16 +315,42 @@ class DecryptedWorkspace:
             self.load(lazy=True)
 
     def _get_entry(self, rel_path: str) -> FileEntry:
-        # Normalize path
-        rel_path = rel_path.replace("\\", "/").lstrip("./")
+        rel_path, _ = self._resolve_rel_path(rel_path)
         if rel_path not in self._files:
             raise FileNotFoundError(rel_path)
         return self._files[rel_path]
+
+    def _resolve_rel_path(self, rel_path: str) -> tuple[str, Path]:
+        """Resolve a workspace-relative path and reject boundary escapes."""
+        if not isinstance(rel_path, str) or not rel_path.strip():
+            raise ValueError("path must be a non-empty string")
+
+        normalized_input = rel_path.replace("\\", "/")
+        relative = Path(normalized_input)
+        if relative.is_absolute():
+            raise ValueError(f"path must be relative to workspace: {rel_path}")
+
+        resolved = (self.directory / relative).resolve()
+        try:
+            normalized = resolved.relative_to(self.directory).as_posix()
+        except ValueError:
+            raise ValueError(f"path escapes workspace: {rel_path}") from None
+
+        if normalized in ("", "."):
+            raise ValueError("path must identify a file inside workspace")
+        return normalized, resolved
 
     def _scan_directory(self, base: Path):
         """Recursively scan and register files."""
         for item in sorted(base.rglob("*")):
             if not item.is_file():
+                continue
+            try:
+                resolved_item = item.resolve()
+                resolved_item.relative_to(self.directory)
+            except (OSError, ValueError):
+                # Do not expose symlinks or other paths that resolve outside
+                # the workspace boundary.
                 continue
             rel_parts = item.relative_to(self.directory).parts
             # Skip ignored dirs
@@ -360,6 +386,10 @@ class DecryptedWorkspace:
             derive_project_key, generate_file_key,
             encrypt_payload_v2, wrap_key,
         )
+
+        normalized, resolved = self._resolve_rel_path(entry.rel_path)
+        entry.rel_path = normalized
+        entry.abs_path = resolved
 
         if entry.content is None:
             # Marked for deletion

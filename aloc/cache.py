@@ -166,13 +166,13 @@ def cache_store_project_key(pid: str, key: bytes, ttl: int = 300) -> None:
 
 
 def cache_forget(pid: str | None = None) -> None:
-    """Clear cached keys. If pid is None, clear all."""
+    """Clear cached keys and passwords. If pid is None, clear all."""
     if pid is not None:
-        path = _cache_file(pid)
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
+        for path in (_cache_file(pid), _cache_file(pid + "-pw")):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
     else:
         cache_dir = _cache_dir()
         if cache_dir.exists():

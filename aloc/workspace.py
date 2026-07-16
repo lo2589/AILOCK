@@ -237,7 +237,9 @@ class DecryptedWorkspace:
             List of flushed file paths.
         """
         flushed = []
-        for entry in self._files.values():
+        # Deletion removes entries from self._files, so iterate over a stable
+        # snapshot rather than the live dictionary view.
+        for entry in list(self._files.values()):
             if entry.dirty:
                 self._flush_entry(entry)
                 flushed.append(entry.rel_path)

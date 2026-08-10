@@ -1,4 +1,4 @@
-"""Memory-only execution engine for ailock.
+"""Memory-only execution engine for ailatch.
 
 Decrypts encrypted Python files into memory and executes them without
 ever writing plaintext to disk. Uses a custom import hook so that
@@ -21,22 +21,22 @@ import sys
 import types
 from pathlib import Path
 
-from aloc.format import is_locked, MAGIC
-from aloc.fileops import atomic_write, read_bytes
+from ailatch.format import is_locked, MAGIC
+from ailatch.fileops import atomic_write, read_bytes
 
 
-class AilockFinder(importlib.abc.MetaPathFinder):
+class AILatchFinder(importlib.abc.MetaPathFinder):
     """
     A custom meta-path finder that intercepts import requests and checks
-    if the target .py file is an ailock-encrypted file. If so, it returns
-    an AilockLoader to decrypt and load the module in memory.
+    if the target .py file is an ailatch-encrypted file. If so, it returns
+    an AILatchLoader to decrypt and load the module in memory.
     """
 
     def __init__(self, search_dirs: list[Path], decrypt_fn):
         """
         Args:
             search_dirs: Directories to search for encrypted modules.
-            decrypt_fn: callable(blob: bytes) -> bytes that decrypts an ailock blob.
+            decrypt_fn: callable(blob: bytes) -> bytes that decrypts an ailatch blob.
         """
         self.search_dirs = search_dirs
         self.decrypt_fn = decrypt_fn
@@ -60,7 +60,7 @@ class AilockFinder(importlib.abc.MetaPathFinder):
             if init_file.exists():
                 blob = read_bytes(init_file)
                 if is_locked(blob):
-                    loader = AilockLoader(init_file, self.decrypt_fn, is_package=True)
+                    loader = AILatchLoader(init_file, self.decrypt_fn, is_package=True)
                     spec = importlib.machinery.ModuleSpec(
                         fullname, loader,
                         origin=str(init_file),
@@ -78,7 +78,7 @@ class AilockFinder(importlib.abc.MetaPathFinder):
             if module_file.exists():
                 blob = read_bytes(module_file)
                 if is_locked(blob):
-                    loader = AilockLoader(module_file, self.decrypt_fn, is_package=False)
+                    loader = AILatchLoader(module_file, self.decrypt_fn, is_package=False)
                     spec = importlib.machinery.ModuleSpec(
                         fullname, loader,
                         origin=str(module_file),
@@ -88,9 +88,9 @@ class AilockFinder(importlib.abc.MetaPathFinder):
         return None
 
 
-class AilockLoader(importlib.abc.Loader):
+class AILatchLoader(importlib.abc.Loader):
     """
-    Loads an ailock-encrypted Python file by decrypting it in memory
+    Loads an ailatch-encrypted Python file by decrypting it in memory
     and compiling the source code.
     """
 
@@ -136,13 +136,13 @@ def run_in_memory(
         Exit code (0 for success, 1 for error).
     """
     if decrypt_fn is None:
-        from aloc.cli import _decrypt_with_password
+        from ailatch.cli import _decrypt_with_password
         # Build the decrypt function (closure over password)
         def decrypt_fn(blob: bytes) -> bytes:
             return _decrypt_with_password(blob, password)
 
     if encrypt_fn is None and password is not None:
-        from aloc.cli import _reencrypt_with_password
+        from ailatch.cli import _reencrypt_with_password
 
         def encrypt_fn(blob: bytes, plaintext: bytes, path: Path) -> bytes:
             return _reencrypt_with_password(blob, plaintext, password, path)
@@ -161,7 +161,7 @@ def run_in_memory(
     search_dirs = [entry_dir]
 
     # Register our custom import finder (insert at beginning for priority)
-    finder = AilockFinder(search_dirs, decrypt_fn)
+    finder = AILatchFinder(search_dirs, decrypt_fn)
     sys.meta_path.insert(0, finder)
 
     # Add entry_dir to sys.path so non-encrypted imports work
@@ -174,7 +174,7 @@ def run_in_memory(
     importlib.invalidate_caches()
 
     # Patch builtins.open and pathlib for transparent file I/O
-    io_patch = AilockIOPatch(search_dirs, decrypt_fn, encrypt_fn=encrypt_fn)
+    io_patch = AILatchIOPatch(search_dirs, decrypt_fn, encrypt_fn=encrypt_fn)
     io_patch.install()
 
     # Set up sys.argv for the script
@@ -258,7 +258,7 @@ class _EncryptedWritebackMixin:
             self._writeback_path,
         )
         if not isinstance(encrypted, bytes) or not is_locked(encrypted):
-            raise ValueError("encrypt_fn did not return a valid AiLock blob")
+            raise ValueError("encrypt_fn did not return a valid AILatch blob")
         atomic_write(self._writeback_path, encrypted)
         self._writeback_blob = encrypted
         self._writeback_dirty = False
@@ -332,10 +332,10 @@ class _EncryptedTextBuffer(_EncryptedWritebackMixin, io.StringIO):
         return result
 
 
-class AilockIOPatch:
+class AILatchIOPatch:
     """
     Patches builtins.open and pathlib.Path.read_text/read_bytes
-    to transparently decrypt ailock files on read, and encrypt on write.
+    to transparently decrypt ailatch files on read, and encrypt on write.
     """
 
     def __init__(self, search_dirs: list[Path], decrypt_fn, encrypt_fn=None):
@@ -422,7 +422,7 @@ class AilockIOPatch:
         return path.resolve()
 
     def _is_encrypted_file(self, filepath) -> bool:
-        """Check if a file path points to an ailock-encrypted file."""
+        """Check if a file path points to an ailatch-encrypted file."""
         try:
             p = self._resolve_file_path(filepath)
 
@@ -510,7 +510,7 @@ class AilockIOPatch:
         return buffer
 
     def _patched_open(self, file, mode="r", *args, **kwargs):
-        """Decrypt reads and atomically re-encrypt writes to AiLock files."""
+        """Decrypt reads and atomically re-encrypt writes to AILatch files."""
         if isinstance(file, (str, Path, pathlib.PurePath)):
             mode_str = mode if isinstance(mode, str) else "r"
             encrypted = self._is_encrypted_file(file)

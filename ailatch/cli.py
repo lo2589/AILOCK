@@ -1,5 +1,5 @@
 """
-CLI entry point for aloc.
+CLI entry point for ailatch.
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ import sys
 import time
 from pathlib import Path
 
-from aloc.fileops import read_bytes, atomic_write, safe_backup
-from aloc.format import (
+from ailatch.fileops import read_bytes, atomic_write, safe_backup
+from ailatch.format import (
     is_locked,
     encode_file,
     parse_locked_file,
@@ -21,7 +21,7 @@ from aloc.format import (
     VERSION_V1,
     VERSION_V2,
 )
-from aloc.crypto import (
+from ailatch.crypto import (
     derive_project_key,
     encrypt_payload,
     decrypt_payload,
@@ -31,7 +31,7 @@ from aloc.crypto import (
     encrypt_payload_v2,
     decrypt_payload_v2,
 )
-from aloc.cache import (
+from ailatch.cache import (
     project_id,
     cache_get_project_key,
     cache_store_project_key,
@@ -39,13 +39,13 @@ from aloc.cache import (
     cache_store_password,
     cache_forget,
 )
-from aloc.recovery import (
+from ailatch.recovery import (
     generate_recovery_key,
     derive_recovery_wrapping_key,
     recover_file_key,
 )
-from aloc.install import install_as
-from aloc.manifest import (
+from ailatch.install import install_as
+from ailatch.manifest import (
     get_rel_path,
     compute_hash,
     register_lock,
@@ -119,7 +119,9 @@ def _decrypt_v2(header: dict, ciphertext: bytes, file_key: bytes) -> bytes:
 # ---------------------------------------------------------------------------
 
 # Directories/patterns to skip when recursing
-_SKIP_DIRS = {".ailock", "__pycache__", ".git", "node_modules", ".venv", "venv"}
+_SKIP_DIRS = {
+    ".ailatch", ".ailock", "__pycache__", ".git", "node_modules", ".venv", "venv"
+}
 _SKIP_SUFFIXES = {".pyc", ".pyo", ".so", ".dylib", ".dll"}
 
 
@@ -611,8 +613,8 @@ def cmd_init(args) -> int:
 
 
 def cmd_config(args) -> int:
-    """View or set ailock configuration."""
-    from aloc.manifest import load_config, set_backup_dir, get_backup_dir
+    """View or set ailatch configuration."""
+    from ailatch.manifest import load_config, set_backup_dir, get_backup_dir
 
     key = getattr(args, "key", None)
     value = getattr(args, "value", None)
@@ -739,7 +741,7 @@ def cmd_freelock(args) -> int:
 
     password = prompt_password()
 
-    from aloc.workspace import DecryptedWorkspace
+    from ailatch.workspace import DecryptedWorkspace
     ws = DecryptedWorkspace(path, password)
 
     lazy = not getattr(args, "eager", False)
@@ -788,7 +790,7 @@ def cmd_freelock(args) -> int:
 # ---------------------------------------------------------------------------
 
 def cmd_open(args) -> int:
-    """Open a directory in the AiLock GUI editor."""
+    """Open a directory in the AILatch GUI editor."""
     path = Path(args.path).resolve()
 
     if not path.exists():
@@ -801,7 +803,7 @@ def cmd_open(args) -> int:
     # Prompt for password
     password = prompt_password()
 
-    from aloc.gui import launch_editor
+    from ailatch.gui import launch_editor
     launch_editor(path, password)
     return 0
 
@@ -889,7 +891,7 @@ def cmd_run(args) -> int:
     if script_args and script_args[0] == "--":
         script_args = script_args[1:]
 
-    from aloc.runner import run_in_memory
+    from ailatch.runner import run_in_memory
     return run_in_memory(path, password=password, script_args=script_args)
 
 
@@ -899,7 +901,7 @@ def cmd_run(args) -> int:
 
 def parse_args(argv: list[str]):
     parser = argparse.ArgumentParser(
-        prog="aloc", description="AiLock - encrypt files in place"
+        prog="ailatch", description="AILatch - encrypt files in place"
     )
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 

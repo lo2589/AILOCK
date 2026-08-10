@@ -8,12 +8,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from aloc.format import is_locked
-from aloc.workspace import DecryptedWorkspace
+from ailatch.format import is_locked
+from ailatch.workspace import DecryptedWorkspace
 
 
 def _fake_crypto_module() -> types.ModuleType:
-    module = types.ModuleType("aloc.crypto")
+    module = types.ModuleType("ailatch.crypto")
     module.derive_project_key = lambda password, salt: b"k" * 32
     module.generate_file_key = lambda: b"f" * 32
     module.encrypt_payload_v2 = lambda key, data, metadata: (b"n" * 12, data)
@@ -23,7 +23,7 @@ def _fake_crypto_module() -> types.ModuleType:
 
 class WorkspacePathSecurityTests(unittest.TestCase):
     def test_parent_traversal_is_rejected_before_flush(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-workspace-path-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-workspace-path-") as temp_dir:
             parent = Path(temp_dir)
             root = parent / "workspace"
             root.mkdir()
@@ -37,7 +37,7 @@ class WorkspacePathSecurityTests(unittest.TestCase):
             self.assertEqual(workspace.flush(), [])
 
     def test_backslash_parent_traversal_is_rejected(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-workspace-backslash-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-workspace-backslash-") as temp_dir:
             root = Path(temp_dir) / "workspace"
             root.mkdir()
             workspace = DecryptedWorkspace(root, "password")
@@ -47,7 +47,7 @@ class WorkspacePathSecurityTests(unittest.TestCase):
                 workspace.write_file("..\\escaped.txt", "outside")
 
     def test_absolute_path_is_rejected(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-workspace-absolute-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-workspace-absolute-") as temp_dir:
             root = Path(temp_dir) / "workspace"
             root.mkdir()
             workspace = DecryptedWorkspace(root, "password")
@@ -58,7 +58,7 @@ class WorkspacePathSecurityTests(unittest.TestCase):
 
     @unittest.skipIf(os.name == "nt", "symlink setup differs on Windows")
     def test_symlink_parent_escape_is_rejected(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-workspace-symlink-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-workspace-symlink-") as temp_dir:
             parent = Path(temp_dir)
             root = parent / "workspace"
             outside = parent / "outside"
@@ -74,7 +74,7 @@ class WorkspacePathSecurityTests(unittest.TestCase):
             self.assertFalse((outside / "escaped.txt").exists())
 
     def test_json_rpc_reports_boundary_violation(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-workspace-rpc-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-workspace-rpc-") as temp_dir:
             root = Path(temp_dir) / "workspace"
             root.mkdir()
             workspace = DecryptedWorkspace(root, "password")
@@ -88,14 +88,14 @@ class WorkspacePathSecurityTests(unittest.TestCase):
             self.assertIn("escapes workspace", response["error"])
 
     def test_valid_nested_path_still_flushes_encrypted(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-workspace-valid-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-workspace-valid-") as temp_dir:
             root = Path(temp_dir) / "workspace"
             root.mkdir()
             workspace = DecryptedWorkspace(root, "password")
             workspace.load()
             workspace.write_file("nested/secret.txt", "inside")
 
-            with mock.patch.dict(sys.modules, {"aloc.crypto": _fake_crypto_module()}):
+            with mock.patch.dict(sys.modules, {"ailatch.crypto": _fake_crypto_module()}):
                 flushed = workspace.flush()
 
             target = root / "nested" / "secret.txt"

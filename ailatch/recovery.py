@@ -8,7 +8,7 @@ the user forgets their password.
 import base64
 import os
 
-from aloc.crypto import derive_project_key, unwrap_key, decrypt_payload_v2
+from ailatch.crypto import derive_project_key, unwrap_key, decrypt_payload_v2
 
 
 # ---------------------------------------------------------------------------

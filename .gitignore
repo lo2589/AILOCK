@@ -1,3 +1,32 @@
-DOC/
+# Build artifacts
+build/
+dist/
+*.egg-info/
 __pycache__/
 *.pyc
+
+# Test / debug / dev junk
+.pytest_cache/
+/debug/
+/testrun/
+/skills/
+test_file.txt
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# AILATCH-managed (encrypted working tree files)
+/.ailatch/
+/.ailatch-backups/
+# Legacy state from releases before the AILatch rename
+/.ailock/
+/.ailock-backups/
+
+# Python
+*.pyo
+*.pyd
+.mypy_cache/
+.coverage
+.tox/

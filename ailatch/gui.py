@@ -1,5 +1,5 @@
 """
-AiLock GUI Editor — tkinter-based encrypted file viewer/editor.
+AILatch GUI Editor — tkinter-based encrypted file viewer/editor.
 
 Opens a dual-pane window: file tree on the left, text editor on the right.
 Decryption runs in a background thread to keep the UI responsive.
@@ -14,17 +14,19 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 from pathlib import Path
 
-from aloc.fileops import read_bytes, atomic_write
-from aloc.format import is_locked
+from ailatch.fileops import read_bytes, atomic_write
+from ailatch.format import is_locked
 
 
 # Directories to skip
-_SKIP_DIRS = {".ailock", "__pycache__", ".git", "node_modules", ".venv", "venv"}
+_SKIP_DIRS = {
+    ".ailatch", ".ailock", "__pycache__", ".git", "node_modules", ".venv", "venv"
+}
 _SKIP_SUFFIXES = {".pyc", ".pyo", ".so", ".dylib", ".dll"}
 
 
-class AilockEditor:
-    """A simple dual-pane GUI editor for ailock-encrypted files."""
+class AILatchEditor:
+    """A simple dual-pane GUI editor for ailatch-encrypted files."""
 
     def __init__(self, root: tk.Tk, directory: Path, password: str):
         self.root = root
@@ -35,7 +37,7 @@ class AilockEditor:
         self._modified = False
         self._load_generation = 0
 
-        self.root.title(f"AiLock - {self.directory.name}/")
+        self.root.title(f"AILatch - {self.directory.name}/")
         self.root.geometry("900x600")
         self.root.minsize(600, 400)
 
@@ -206,7 +208,7 @@ class AilockEditor:
 
     def _decrypt_async(self, path: Path, blob: bytes, load_generation: int):
         """Decrypt file in background thread."""
-        from aloc.cli import _decrypt_with_password
+        from ailatch.cli import _decrypt_with_password
 
         t0 = time.time()
         try:
@@ -312,8 +314,8 @@ class AilockEditor:
         """Save (and optionally re-encrypt) in background thread."""
         try:
             if encrypt:
-                from aloc.cli import _reencrypt_with_password
-                from aloc.manifest import (
+                from ailatch.cli import _reencrypt_with_password
+                from ailatch.manifest import (
                     compute_hash,
                     get_rel_path,
                     update_locked_hash,
@@ -359,7 +361,7 @@ class AilockEditor:
 
 
 def launch_editor(directory: Path, password: str):
-    """Launch the AiLock GUI editor."""
+    """Launch the AILatch GUI editor."""
     root = tk.Tk()
-    AilockEditor(root, directory, password)
+    AILatchEditor(root, directory, password)
     root.mainloop()

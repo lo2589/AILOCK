@@ -48,16 +48,16 @@ def _cache_dir() -> Path:
     for var in ("TMPDIR", "TEMP", "TMP"):
         value = os.environ.get(var)
         if value:
-            candidates.append(Path(value) / "aloc-cache")
+            candidates.append(Path(value) / "ailatch-cache")
 
-    candidates.append(Path(tempfile.gettempdir()) / "aloc-cache")
+    candidates.append(Path(tempfile.gettempdir()) / "ailatch-cache")
 
     if os.name == "nt":
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:
-            candidates.append(Path(local_app_data) / "AiLock" / "cache")
+            candidates.append(Path(local_app_data) / "AILatch" / "cache")
 
-    candidates.append(Path.home() / ".ailock" / "cache")
+    candidates.append(Path.home() / ".ailatch" / "cache")
 
     last_error = None
     for base in candidates:
@@ -73,7 +73,7 @@ def _cache_dir() -> Path:
         except OSError as e:
             last_error = e
 
-    raise OSError(f"no writable AiLock cache directory found: {last_error}")
+    raise OSError(f"no writable AILatch cache directory found: {last_error}")
 
 
 def _cache_file(pid: str) -> Path:

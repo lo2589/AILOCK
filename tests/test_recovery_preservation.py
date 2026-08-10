@@ -9,9 +9,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from aloc.format import encode_file, parse_locked_file
-from aloc.gui import AilockEditor
-from aloc.workspace import DecryptedWorkspace
+from ailatch.format import encode_file, parse_locked_file
+from ailatch.gui import AILatchEditor
+from ailatch.workspace import DecryptedWorkspace
 
 
 def _header_with_recovery() -> dict:
@@ -28,7 +28,7 @@ def _header_with_recovery() -> dict:
 
 
 def _fake_cli_module() -> types.ModuleType:
-    module = types.ModuleType("aloc.cli")
+    module = types.ModuleType("ailatch.cli")
 
     def reencrypt(blob, plaintext, password, path):
         header, _ = parse_locked_file(blob)
@@ -41,8 +41,8 @@ def _fake_cli_module() -> types.ModuleType:
 
 
 def _write_manifest(root: Path, rel_path: str, locked_blob: bytes) -> None:
-    ailock_dir = root / ".ailock"
-    (ailock_dir / "backups").mkdir(parents=True)
+    ailatch_dir = root / ".ailatch"
+    (ailatch_dir / "backups").mkdir(parents=True)
     manifest = {
         "files": {
             rel_path: {
@@ -54,7 +54,7 @@ def _write_manifest(root: Path, rel_path: str, locked_blob: bytes) -> None:
             }
         }
     }
-    (ailock_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (ailatch_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
 class _DeferredRoot:
@@ -70,33 +70,33 @@ class RecoveryPreservationTests(unittest.TestCase):
             [item["type"] for item in updated_header["key_wraps"]],
             ["password", "recovery"],
         )
-        manifest = json.loads((root / ".ailock" / "manifest.json").read_text())
+        manifest = json.loads((root / ".ailatch" / "manifest.json").read_text())
         entry = manifest["files"][target.relative_to(root).as_posix()]
         self.assertEqual(entry["locked_hash"], hashlib.sha256(updated_blob).hexdigest())
         self.assertIn("updated_at", entry)
 
     def test_gui_save_preserves_recovery_and_updates_manifest(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-gui-recovery-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-gui-recovery-") as temp_dir:
             root = Path(temp_dir)
             target = root / "secret.txt"
             original_blob = encode_file(_header_with_recovery(), b"old")
             target.write_bytes(original_blob)
             _write_manifest(root, "secret.txt", original_blob)
 
-            editor = AilockEditor.__new__(AilockEditor)
+            editor = AILatchEditor.__new__(AILatchEditor)
             editor.root = _DeferredRoot()
             editor.password = "password"
 
             with (
-                mock.patch("aloc.manifest.get_project_root", return_value=root),
-                mock.patch.dict(sys.modules, {"aloc.cli": _fake_cli_module()}),
+                mock.patch("ailatch.manifest.get_project_root", return_value=root),
+                mock.patch.dict(sys.modules, {"ailatch.cli": _fake_cli_module()}),
             ):
                 editor._save_async(target, b"edited", True)
 
             self._assert_preserved_and_manifest_updated(root, target)
 
     def test_workspace_save_preserves_recovery_and_updates_manifest(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-workspace-recovery-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-workspace-recovery-") as temp_dir:
             root = Path(temp_dir)
             target = root / "secret.txt"
             original_blob = encode_file(_header_with_recovery(), b"old")
@@ -110,8 +110,8 @@ class RecoveryPreservationTests(unittest.TestCase):
             entry.dirty = True
 
             with (
-                mock.patch("aloc.manifest.get_project_root", return_value=root),
-                mock.patch.dict(sys.modules, {"aloc.cli": _fake_cli_module()}),
+                mock.patch("ailatch.manifest.get_project_root", return_value=root),
+                mock.patch.dict(sys.modules, {"ailatch.cli": _fake_cli_module()}),
             ):
                 workspace.flush()
 

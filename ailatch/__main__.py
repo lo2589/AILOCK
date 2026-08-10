@@ -1,4 +1,4 @@
-from aloc.cli import main
+from ailatch.cli import main
 import sys
 
 if __name__ == "__main__":

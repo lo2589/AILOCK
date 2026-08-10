@@ -1,11 +1,11 @@
 """
-DecryptedWorkspace - A memory-only decrypted view of an ailock-encrypted directory.
+DecryptedWorkspace - A memory-only decrypted view of an ailatch-encrypted directory.
 
 Provides a standard file-operation API that external tools/frameworks can use
 to read, write, list, and search encrypted files WITHOUT writing plaintext to disk.
 
 Usage:
-    from aloc.workspace import DecryptedWorkspace
+    from ailatch.workspace import DecryptedWorkspace
 
     ws = DecryptedWorkspace("/path/to/project", password="xxx")
     ws.load()
@@ -27,12 +27,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from aloc.fileops import read_bytes, atomic_write
-from aloc.format import is_locked, encode_file
+from ailatch.fileops import read_bytes, atomic_write
+from ailatch.format import is_locked, encode_file
 
 
 # Directories to skip
-_SKIP_DIRS = {".ailock", "__pycache__", ".git", "node_modules", ".venv", "venv"}
+_SKIP_DIRS = {
+    ".ailatch", ".ailock", "__pycache__", ".git", "node_modules", ".venv", "venv"
+}
 _SKIP_SUFFIXES = {".pyc", ".pyo", ".so", ".dylib", ".dll"}
 
 
@@ -376,7 +378,7 @@ class DecryptedWorkspace:
 
     def _decrypt_entry(self, entry: FileEntry):
         """Decrypt a file entry into memory."""
-        from aloc.cli import _decrypt_with_password
+        from ailatch.cli import _decrypt_with_password
 
         blob = read_bytes(entry.abs_path)
         plaintext = _decrypt_with_password(blob, self.password)
@@ -402,7 +404,7 @@ class DecryptedWorkspace:
                 read_bytes(entry.abs_path) if entry.abs_path.exists() else None
             )
             if original_blob is not None and is_locked(original_blob):
-                from aloc.cli import _reencrypt_with_password
+                from ailatch.cli import _reencrypt_with_password
 
                 blob = _reencrypt_with_password(
                     original_blob,
@@ -413,7 +415,7 @@ class DecryptedWorkspace:
             else:
                 # New workspace files do not have an existing file key or
                 # recovery wrap, so create their initial password wrap.
-                from aloc.crypto import (
+                from ailatch.crypto import (
                     derive_project_key,
                     generate_file_key,
                     encrypt_payload_v2,
@@ -447,7 +449,7 @@ class DecryptedWorkspace:
                 blob = encode_file(header, ciphertext)
             entry.abs_path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write(entry.abs_path, blob)
-            from aloc.manifest import compute_hash, get_rel_path, update_locked_hash
+            from ailatch.manifest import compute_hash, get_rel_path, update_locked_hash
 
             update_locked_hash(
                 get_rel_path(entry.abs_path),

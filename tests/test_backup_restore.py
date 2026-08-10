@@ -10,11 +10,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from aloc.manifest import _encode_backup_name, create_backup
+from ailatch.manifest import _encode_backup_name, _state_dir_path, create_backup
 
 
 def _fake_crypto_module() -> types.ModuleType:
-    module = types.ModuleType("aloc.crypto")
+    module = types.ModuleType("ailatch.crypto")
     module.derive_project_key = lambda password, salt: b"p" * 32
     module.encrypt_payload = lambda key, data, metadata: (b"1" * 12, b"v1")
     module.decrypt_payload = lambda key, header, ciphertext: b"plain"
@@ -27,7 +27,7 @@ def _fake_crypto_module() -> types.ModuleType:
 
 
 def _write_fallback_backup(root: Path, backup_name: str) -> None:
-    backup_dir = root / ".ailock" / "backups"
+    backup_dir = root / ".ailatch" / "backups"
     backup_dir.mkdir(parents=True)
     meta = {
         "salt": "c2FsdHNhbHRzYWx0c2FsdA==",
@@ -41,6 +41,18 @@ def _write_fallback_backup(root: Path, backup_name: str) -> None:
 
 
 class BackupRestoreTests(unittest.TestCase):
+    def test_legacy_state_directory_remains_readable_after_rename(self):
+        with tempfile.TemporaryDirectory(prefix="ailatch-legacy-state-") as temp_dir:
+            root = Path(temp_dir)
+            legacy = root / ".ailock"
+            legacy.mkdir()
+            with mock.patch("ailatch.manifest.get_project_root", return_value=root):
+                self.assertEqual(_state_dir_path(), legacy)
+
+                current = root / ".ailatch"
+                current.mkdir()
+                self.assertEqual(_state_dir_path(), current)
+
     def test_distinct_paths_have_distinct_backup_names(self):
         self.assertNotEqual(
             _encode_backup_name("a/b.txt"),
@@ -48,16 +60,16 @@ class BackupRestoreTests(unittest.TestCase):
         )
 
     def test_repeated_backup_creation_never_reuses_existing_name(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-backup-name-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-backup-name-") as temp_dir:
             root = Path(temp_dir)
             fake_crypto = _fake_crypto_module()
             with (
-                mock.patch("aloc.manifest.get_project_root", return_value=root),
+                mock.patch("ailatch.manifest.get_project_root", return_value=root),
                 mock.patch.dict(
                     sys.modules,
-                    {"aloc.crypto": fake_crypto, "pyzipper": None},
+                    {"ailatch.crypto": fake_crypto, "pyzipper": None},
                 ),
-                mock.patch("aloc.manifest.time.time_ns", return_value=123456),
+                mock.patch("ailatch.manifest.time.time_ns", return_value=123456),
             ):
                 first = create_backup("src/secret.txt", b"one", "password")
                 second = create_backup("src/secret.txt", b"two", "password")
@@ -65,15 +77,15 @@ class BackupRestoreTests(unittest.TestCase):
 
             self.assertEqual(len({first, second, third}), 3)
             for name in (first, second, third):
-                self.assertTrue((root / ".ailock" / "backups" / name).exists())
+                self.assertTrue((root / ".ailatch" / "backups" / name).exists())
 
     def test_cli_restore_recovers_a_missing_file_and_clears_manifest(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-cli-restore-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-cli-restore-") as temp_dir:
             root = Path(temp_dir)
             target = root / "secret.txt"
             backup_name = "secret-backup.zip"
             _write_fallback_backup(root, backup_name)
-            manifest_path = root / ".ailock" / "manifest.json"
+            manifest_path = root / ".ailatch" / "manifest.json"
             manifest_path.write_text(
                 json.dumps({
                     "files": {
@@ -90,18 +102,18 @@ class BackupRestoreTests(unittest.TestCase):
             )
 
             fake_crypto = _fake_crypto_module()
-            sys.modules.pop("aloc.cli", None)
-            sys.modules.pop("aloc.recovery", None)
+            sys.modules.pop("ailatch.cli", None)
+            sys.modules.pop("ailatch.recovery", None)
             try:
-                with mock.patch.dict(sys.modules, {"aloc.crypto": fake_crypto}):
-                    from aloc import cli
+                with mock.patch.dict(sys.modules, {"ailatch.crypto": fake_crypto}):
+                    from ailatch import cli
 
                     parsed = cli.parse_args(["restore", str(target)])
                     self.assertEqual(parsed.cmd, "restore")
 
                     with (
                         mock.patch(
-                            "aloc.manifest.get_project_root",
+                            "ailatch.manifest.get_project_root",
                             return_value=root,
                         ),
                         mock.patch.object(cli, "prompt_password", return_value="password"),
@@ -111,8 +123,8 @@ class BackupRestoreTests(unittest.TestCase):
                             SimpleNamespace(path=str(target), backup=False)
                         )
             finally:
-                sys.modules.pop("aloc.cli", None)
-                sys.modules.pop("aloc.recovery", None)
+                sys.modules.pop("ailatch.cli", None)
+                sys.modules.pop("ailatch.recovery", None)
 
             self.assertEqual(result, 0)
             self.assertEqual(target.read_bytes(), b"RESTORED CONTENT")

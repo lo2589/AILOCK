@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from aloc.gui import AilockEditor
+from ailatch.gui import AILatchEditor
 
 
 class _QueuedRoot:
@@ -24,7 +24,7 @@ class _QueuedRoot:
 
 
 def _fake_cli(plaintext: bytes = b"PLAINTEXT_A", error: Exception | None = None):
-    module = types.ModuleType("aloc.cli")
+    module = types.ModuleType("ailatch.cli")
 
     def decrypt(blob, password):
         if error is not None:
@@ -37,7 +37,7 @@ def _fake_cli(plaintext: bytes = b"PLAINTEXT_A", error: Exception | None = None)
 
 class GUIAsyncSelectionTests(unittest.TestCase):
     def _editor(self, current_file: Path, generation: int):
-        editor = AilockEditor.__new__(AilockEditor)
+        editor = AILatchEditor.__new__(AILatchEditor)
         editor.root = _QueuedRoot()
         editor.password = "password"
         editor.current_file = current_file
@@ -45,7 +45,7 @@ class GUIAsyncSelectionTests(unittest.TestCase):
         return editor
 
     def test_stale_success_from_previous_file_is_ignored(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-gui-race-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-gui-race-") as temp_dir:
             root = Path(temp_dir)
             file_a = root / "a.txt"
             file_b = root / "b.txt"
@@ -54,7 +54,7 @@ class GUIAsyncSelectionTests(unittest.TestCase):
             editor._display_content = applied.append
             editor._set_status = lambda value: None
 
-            with mock.patch.dict(sys.modules, {"aloc.cli": _fake_cli()}):
+            with mock.patch.dict(sys.modules, {"ailatch.cli": _fake_cli()}):
                 editor._decrypt_async(file_a, b"cipher-a", 1)
 
             editor.current_file = file_b
@@ -63,14 +63,14 @@ class GUIAsyncSelectionTests(unittest.TestCase):
             self.assertEqual(applied, [])
 
     def test_old_generation_is_ignored_after_selecting_same_path_again(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-gui-generation-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-gui-generation-") as temp_dir:
             file_a = Path(temp_dir) / "a.txt"
             editor = self._editor(file_a, 1)
             applied = []
             editor._display_content = applied.append
             editor._set_status = lambda value: None
 
-            with mock.patch.dict(sys.modules, {"aloc.cli": _fake_cli()}):
+            with mock.patch.dict(sys.modules, {"ailatch.cli": _fake_cli()}):
                 editor._decrypt_async(file_a, b"old-cipher-a", 1)
 
             editor._load_generation = 3
@@ -78,7 +78,7 @@ class GUIAsyncSelectionTests(unittest.TestCase):
             self.assertEqual(applied, [])
 
     def test_current_success_is_applied(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-gui-current-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-gui-current-") as temp_dir:
             file_a = Path(temp_dir) / "a.txt"
             editor = self._editor(file_a, 4)
             applied = []
@@ -88,7 +88,7 @@ class GUIAsyncSelectionTests(unittest.TestCase):
 
             with mock.patch.dict(
                 sys.modules,
-                {"aloc.cli": _fake_cli(plaintext=b"CURRENT")},
+                {"ailatch.cli": _fake_cli(plaintext=b"CURRENT")},
             ):
                 editor._decrypt_async(file_a, b"cipher-a", 4)
 
@@ -97,7 +97,7 @@ class GUIAsyncSelectionTests(unittest.TestCase):
             self.assertEqual(len(statuses), 1)
 
     def test_stale_error_is_ignored(self):
-        with tempfile.TemporaryDirectory(prefix="ailock-gui-error-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ailatch-gui-error-") as temp_dir:
             root = Path(temp_dir)
             file_a = root / "a.txt"
             file_b = root / "b.txt"
@@ -107,7 +107,7 @@ class GUIAsyncSelectionTests(unittest.TestCase):
 
             with mock.patch.dict(
                 sys.modules,
-                {"aloc.cli": _fake_cli(error=ValueError("bad password"))},
+                {"ailatch.cli": _fake_cli(error=ValueError("bad password"))},
             ):
                 editor._decrypt_async(file_a, b"cipher-a", 1)
 

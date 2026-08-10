@@ -1,8 +1,8 @@
 """
-Backup and manifest management for .ailock/ directory.
+Backup and manifest management for .ailatch/ directory.
 
 Handles:
-- .ailock/ directory structure
+- .ailatch/ directory structure
 - manifest.json tracking of all locked files
 - Zip-encrypted backup creation and restoration
 - SHA256 hash computation
@@ -19,6 +19,10 @@ import time
 import zipfile
 from pathlib import Path
 from typing import Optional
+
+
+_STATE_DIR_NAME = ".ailatch"
+_LEGACY_STATE_DIR_NAME = ".ailock"
 
 
 def _find_git_root() -> Optional[Path]:
@@ -42,13 +46,23 @@ def get_project_root() -> Path:
     return _find_git_root() or Path.cwd()
 
 
+def _state_dir_path() -> Path:
+    """Return the current state directory, reusing legacy projects in place."""
+    root = get_project_root()
+    current = root / _STATE_DIR_NAME
+    legacy = root / _LEGACY_STATE_DIR_NAME
+    if current.exists() or not legacy.exists():
+        return current
+    return legacy
+
+
 def _config_path() -> Path:
     """Get config file path (always at project root)."""
-    return get_project_root() / ".ailock" / "config.json"
+    return _state_dir_path() / "config.json"
 
 
 def load_config() -> dict:
-    """Load .ailock/config.json. Returns empty dict if not found."""
+    """Load .ailatch/config.json. Returns empty dict if not found."""
     path = _config_path()
     if not path.exists():
         return {}
@@ -59,7 +73,7 @@ def load_config() -> dict:
 
 
 def save_config(config: dict) -> None:
-    """Save config to .ailock/config.json."""
+    """Save config to .ailatch/config.json."""
     path = _config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -78,8 +92,8 @@ def get_backup_dir() -> Path:
             p = get_project_root() / p
         p.mkdir(parents=True, exist_ok=True)
         return p
-    # Default: .ailock/backups/
-    default = get_project_root() / ".ailock" / "backups"
+    # Default: .ailatch/backups/ (or the existing legacy state directory).
+    default = _state_dir_path() / "backups"
     default.mkdir(parents=True, exist_ok=True)
     return default
 
@@ -96,12 +110,12 @@ def set_backup_dir(path_str: str) -> Path:
     return p
 
 
-def get_ailock_dir() -> Path:
-    """Get the .ailock/ directory path under project root, creating if needed."""
-    ailock_dir = get_project_root() / ".ailock"
-    ailock_dir.mkdir(parents=True, exist_ok=True)
+def get_ailatch_dir() -> Path:
+    """Get the .ailatch/ directory path under project root, creating if needed."""
+    state_dir = _state_dir_path()
+    state_dir.mkdir(parents=True, exist_ok=True)
     get_backup_dir()  # ensure backup dir exists
-    return ailock_dir
+    return state_dir
 
 
 def compute_hash(data: bytes) -> str:
@@ -111,7 +125,7 @@ def compute_hash(data: bytes) -> str:
 
 def _manifest_path() -> Path:
     """Get the manifest.json file path."""
-    return get_ailock_dir() / "manifest.json"
+    return get_ailatch_dir() / "manifest.json"
 
 
 def load_manifest() -> dict:
@@ -209,7 +223,7 @@ def create_backup(rel_path: str, original_data: bytes, password: str) -> str:
 
     Returns the backup filename.
     """
-    ailock_dir = get_ailock_dir()
+    ailatch_dir = get_ailatch_dir()
     backup_name = _encode_backup_name(rel_path)
     backup_dir = get_backup_dir()
     backup_path = backup_dir / backup_name
@@ -245,13 +259,13 @@ def create_backup(rel_path: str, original_data: bytes, password: str) -> str:
     except ImportError:
         # Fallback: use standard zipfile (no encryption, but still zipped)
         # We encrypt the content ourselves before zipping
-        from aloc.crypto import derive_project_key, encrypt_payload_v2, generate_file_key
+        from ailatch.crypto import derive_project_key, encrypt_payload_v2, generate_file_key
         import base64
 
         # Encrypt data with password before putting in zip
         salt = os.urandom(16)
         file_key = generate_file_key()
-        from aloc.crypto import wrap_key
+        from ailatch.crypto import wrap_key
         pw_key = derive_project_key(password, salt)
         nonce, ciphertext = encrypt_payload_v2(file_key, original_data, {"backup": True})
         pw_nonce, pw_wrapped = wrap_key(pw_key, file_key)
@@ -335,7 +349,7 @@ def restore_from_backup(rel_path: str, password: str, current_hash: Optional[str
         import sys
         print(f"  (matched backup via: {matched_key})", file=sys.stderr)
 
-    ailock_dir = get_ailock_dir()
+    ailatch_dir = get_ailatch_dir()
     backup_dir = get_backup_dir()
     backup_path = backup_dir / Path(entry["backup"]).name
 
@@ -353,7 +367,7 @@ def restore_from_backup(rel_path: str, password: str, current_hash: Optional[str
     except ImportError:
         # Fallback: decrypt from our custom format
         import base64
-        from aloc.crypto import derive_project_key, decrypt_payload_v2, unwrap_key
+        from ailatch.crypto import derive_project_key, decrypt_payload_v2, unwrap_key
 
         with zipfile.ZipFile(backup_path, "r") as zf:
             names = zf.namelist()

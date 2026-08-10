@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 import zipfile
@@ -138,11 +139,11 @@ def save_manifest(manifest: dict) -> None:
 
 def _encode_backup_name(rel_path: str) -> str:
     """Encode a relative path into a safe filename for backup zip."""
-    # Replace path separators and special chars with underscores
-    safe = rel_path.replace("/", "_").replace("\\", "_")
-    # Remove leading dots to avoid hidden files
-    safe = safe.lstrip(".")
-    return safe + ".zip"
+    normalized = rel_path.replace("\\", "/")
+    filename = Path(normalized).name or "file"
+    safe = re.sub(r"[^a-zA-Z0-9._-]", "_", filename).lstrip(".") or "file"
+    path_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+    return f"{safe}-{path_hash}.zip"
 
 
 def get_rel_path(file_path: Path) -> str:
@@ -216,8 +217,13 @@ def create_backup(rel_path: str, original_data: bytes, password: str) -> str:
     # If backup already exists, add timestamp
     if backup_path.exists():
         stem = backup_path.stem
-        backup_name = f"{stem}_{int(time.time())}.zip"
+        suffix = time.time_ns()
+        backup_name = f"{stem}_{suffix}.zip"
         backup_path = backup_dir / backup_name
+        while backup_path.exists():
+            suffix += 1
+            backup_name = f"{stem}_{suffix}.zip"
+            backup_path = backup_dir / backup_name
 
     # Create zip with password protection
     # Python's zipfile doesn't support writing encrypted zips natively,

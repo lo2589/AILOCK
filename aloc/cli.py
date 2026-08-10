@@ -685,6 +685,43 @@ def cmd_recover(args) -> int:
     return 0
 
 
+def cmd_restore(args) -> int:
+    """Restore a plaintext file from its encrypted backup."""
+    path = Path(args.path)
+    if path.exists() and path.is_dir():
+        print(f"error: restore target is a directory: {path}", file=sys.stderr)
+        return 1
+
+    rel_path = get_rel_path(path)
+    current_data = read_bytes(path) if path.exists() else None
+    current_hash = compute_hash(current_data) if current_data is not None else None
+
+    try:
+        password = prompt_password()
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        restored = restore_from_backup(rel_path, password, current_hash)
+    except Exception as e:
+        print(f"error: could not restore backup: {e}", file=sys.stderr)
+        return 1
+
+    if restored is None:
+        print(f"error: no backup found for: {path}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "backup", False) and current_data is not None:
+        safe_backup(path, current_data)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(path, restored)
+    unregister_lock(rel_path)
+    print(f"restored: {path}")
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Freelock command - JSON-RPC workspace server
 # ---------------------------------------------------------------------------
@@ -915,6 +952,15 @@ def parse_args(argv: list[str]):
         "--backup", action="store_true", help="create .bak before recovering"
     )
 
+    restore_parser = subparsers.add_parser(
+        "restore", help="restore plaintext from an encrypted backup"
+    )
+    restore_parser.add_argument("path", help="file path to restore")
+    restore_parser.add_argument(
+        "--backup", action="store_true",
+        help="create .bak of the current damaged file before restoring",
+    )
+
     run_parser = subparsers.add_parser(
         "run", help="decrypt and execute a Python file in memory (AI cannot see plaintext)"
     )
@@ -971,6 +1017,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_config(args)
     elif args.cmd == "recover":
         return cmd_recover(args)
+    elif args.cmd == "restore":
+        return cmd_restore(args)
     elif args.cmd == "run":
         return cmd_run(args)
     elif args.cmd == "open":

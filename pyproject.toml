@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ailatch"
-version = "0.1.0"
-description = "AILatch - encrypt files in place to protect from AI modifications"
+version = "0.1.1"
+description = "AILatch (formerly AiLock) - encrypt files in place to protect from AI modifications"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "lo2589" }]
-keywords = ["ai", "encryption", "privacy", "source-code", "developer-tools"]
+keywords = ["ai", "ailatch", "ailock", "encryption", "privacy", "source-code", "developer-tools"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -39,6 +39,7 @@ dev = ["build>=1.2", "twine>=6.0"]
 
 [project.scripts]
 ailatch = "ailatch.cli:main"
+ailock = "ailatch.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["ailatch*"]
+include = ["ailatch*", "aloc*"]

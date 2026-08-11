@@ -901,7 +901,7 @@ def cmd_run(args) -> int:
 
 def parse_args(argv: list[str]):
     parser = argparse.ArgumentParser(
-        prog="ailatch", description="AILatch - encrypt files in place"
+        prog="ailatch", description="AILatch (formerly AiLock) - encrypt files in place"
     )
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 

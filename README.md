@@ -1,4 +1,8 @@
-# AILatch
+# AILatch — formerly **AiLock / AILOCK**
+
+> **AILatch is the new name of AiLock.** Existing users can keep using the
+> `ailock` command and `python -m aloc`; both remain supported compatibility
+> entry points. New documentation uses `ailatch`.
 
 **Latch private files away from AI while keeping encrypted Python code runnable.**
 
@@ -72,6 +76,13 @@ Check the command:
 
 ```bash
 ailatch --help
+```
+
+Upgrading from AiLock? The old command still works:
+
+```bash
+ailock --help
+python -m aloc --help
 ```
 
 If the command is not on your `PATH`, use the module entry point:

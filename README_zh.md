@@ -1,4 +1,7 @@
-# AILatch
+# AILatch（原名 **AiLock / AILOCK**）
+
+> **AILatch 就是原来的 AiLock。** 老用户仍可继续使用 `ailock` 命令和
+> `python -m aloc`；这两个旧入口会继续兼容。新文档统一使用 `ailatch`。
 
 **AILatch 给源代码加密，加密后的代码借助 AILatch 依然能正常运行。**
 
@@ -29,6 +32,13 @@ English README: [README.md](README.md)
 - 主要测试桌面开发环境为 Windows 和 macOS。
 
 ## 安装指南
+
+从 AiLock 升级的用户可以继续使用旧命令：
+
+```bash
+ailock --help
+python -m aloc --help
+```
 
 从 GitHub 安装：
 

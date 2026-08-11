@@ -1,1 +1,1 @@
-"""AILatch - encrypt files in place."""
+"""AILatch (formerly AiLock) - encrypt files in place."""

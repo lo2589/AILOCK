@@ -1,8 +1,15 @@
-# AILatch — formerly **AiLock / AILOCK**
+# AILatch — Protect sensitive source code from AI agents while keeping it executable at runtime.
 
 > **AILatch is the new name of AiLock.** Existing users can keep using the
 > `ailock` command and `python -m aloc`; both remain supported compatibility
 > entry points. New documentation uses `ailatch`.
+
+## Demo
+
+<https://github.com/lo2589/AILATCH/raw/main/ailatch.mp4>
+
+*(Click the link above if your viewer doesn't auto-play the video. The file
+[`ailatch.mp4`](./ailatch.mp4) lives at the repository root.)*
 
 **Latch private files away from AI while keeping encrypted Python code runnable.**
 

@@ -49,43 +49,47 @@ class AILatchFinder(importlib.abc.MetaPathFinder):
         return None
 
     def find_spec(self, fullname, path, target=None):
-        """Find a module spec for the given module name."""
-        parts = fullname.split(".")
+        """Wrap the module Python would actually import when it is encrypted.
 
-        # Try each search directory
-        for base_dir in self.search_dirs:
-            # Try as a package (directory with __init__.py)
-            pkg_dir = base_dir / Path(*parts)
-            init_file = pkg_dir / "__init__.py"
-            if init_file.exists():
-                blob = read_bytes(init_file)
-                if is_locked(blob):
-                    loader = AILatchLoader(init_file, self.decrypt_fn, is_package=True)
-                    spec = importlib.machinery.ModuleSpec(
-                        fullname, loader,
-                        origin=str(init_file),
-                        is_package=True,
-                    )
-                    spec.submodule_search_locations = [str(pkg_dir)]
-                    return spec
+        Delegating path resolution to ``PathFinder`` is important here.  The
+        entry script can live outside the protected repository while importing
+        a package through ``PYTHONPATH``, an editable install, or a package
+        parent's ``__path__``.  A static list based only on the entry script's
+        directory misses those imports, especially relative submodule imports.
 
-            # Try as a plain module
-            if len(parts) == 1:
-                module_file = base_dir / f"{parts[0]}.py"
-            else:
-                module_file = base_dir / Path(*parts[:-1]) / f"{parts[-1]}.py"
+        Resolution itself does not execute or decode the source file.  We only
+        replace the loader when the resolved ``.py`` file has the AILatch magic
+        prefix, so ordinary imports continue through Python unchanged.
+        """
+        resolved = importlib.machinery.PathFinder.find_spec(fullname, path)
+        if resolved is None or not resolved.origin:
+            return None
 
-            if module_file.exists():
-                blob = read_bytes(module_file)
-                if is_locked(blob):
-                    loader = AILatchLoader(module_file, self.decrypt_fn, is_package=False)
-                    spec = importlib.machinery.ModuleSpec(
-                        fullname, loader,
-                        origin=str(module_file),
-                    )
-                    return spec
+        origin = Path(resolved.origin)
+        if origin.suffix != ".py" or not origin.is_file():
+            return None
 
-        return None
+        try:
+            with open(origin, "rb") as stream:
+                prefix = stream.read(11)
+        except OSError:
+            return None
+        if not is_locked(prefix):
+            return None
+
+        is_package = resolved.submodule_search_locations is not None
+        loader = AILatchLoader(origin, self.decrypt_fn, is_package=is_package)
+        spec = importlib.machinery.ModuleSpec(
+            fullname,
+            loader,
+            origin=str(origin),
+            is_package=is_package,
+        )
+        if is_package:
+            spec.submodule_search_locations = list(
+                resolved.submodule_search_locations or [str(origin.parent)]
+            )
+        return spec
 
 
 class AILatchLoader(importlib.abc.Loader):
